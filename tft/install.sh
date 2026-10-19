@@ -29,6 +29,9 @@ chmod 755 /usr/local/bin/tftcal
 [ -f /etc/default/tft ] || echo "KBD_LAYOUT=us" > /etc/default/tft
 # touch support: on = poll the XPT2046 (touch wired), off = ignore touch (no touch wiring)
 grep -q '^TFT_TOUCH=' /etc/default/tft || echo "TFT_TOUCH=on" >> /etc/default/tft
+# which screen tftd mirrors (xwd = Xvfb, fb = /dev/fb0) and which mode starts at boot (terminal|gui|console)
+grep -q '^TFT_SOURCE=' /etc/default/tft || echo "TFT_SOURCE=xwd" >> /etc/default/tft
+grep -q '^TFT_MODE=' /etc/default/tft || echo "TFT_MODE=terminal" >> /etc/default/tft
 cat > /usr/local/bin/tfttouch <<'EOF'
 #!/bin/sh
 # usage: sudo tfttouch on|off
@@ -62,12 +65,13 @@ EOF
 
 cat > /etc/systemd/system/tftd.service <<'EOF'
 [Unit]
-Description=Mirror virtual X screen to ILI9488 SPI TFT
+Description=Mirror the 480x320 screen (Xvfb file or /dev/fb0) to the ILI9488 SPI TFT
 After=tft-xvfb.service
-Wants=tft-xvfb.service
 
 [Service]
-ExecStart=/usr/bin/python3 /opt/tft/tftd.py
+Environment=TFT_SOURCE=xwd
+EnvironmentFile=-/etc/default/tft
+ExecStart=/usr/bin/python3 /opt/tft/tftd.py --source $TFT_SOURCE
 Restart=always
 RestartSec=2
 
@@ -127,21 +131,52 @@ EOF
 
 cat > /usr/local/bin/tftmode <<'EOF'
 #!/bin/sh
-# usage: sudo tftmode terminal|gui
+# usage: sudo tftmode terminal|gui|console
+#   terminal  xterm on the virtual X screen        gui      Openbox desktop on the virtual X screen
+#   console   the real tty1 console (/dev/fb0 forced to 480x320, see README)
+CFG=/etc/default/tft
+setvar() {
+  if grep -q "^$1=" "$CFG"; then sed -i "s|^$1=.*|$1=$2|" "$CFG"; else echo "$1=$2" >> "$CFG"; fi
+}
 case "$1" in
   terminal|gui)
+    setvar TFT_SOURCE xwd; setvar TFT_MODE "$1"
     systemctl stop tft-mode-terminal tft-mode-gui 2>/dev/null
+    chvt 7 2>/dev/null     # park the keyboard on an unused VT so typing does not reach the tty1 login
     systemctl restart tft-xvfb tftd
     sleep 1
     systemctl start "tft-mode-$1"
     ;;
-  *) echo "usage: sudo tftmode terminal|gui"; exit 1 ;;
+  console)
+    setvar TFT_SOURCE fb; setvar TFT_MODE console
+    systemctl stop tft-mode-terminal tft-mode-gui tft-xvfb 2>/dev/null
+    systemctl restart tftd
+    chvt 1 2>/dev/null
+    ;;
+  *) echo "usage: sudo tftmode terminal|gui|console"; exit 1 ;;
 esac
 EOF
 chmod 755 /usr/local/bin/tftmode
 
+cat > /etc/systemd/system/tft-boot.service <<'EOF'
+[Unit]
+Description=Start the last used TFT mode (terminal, gui or console)
+After=tftd.service tft-input.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=TFT_MODE=terminal
+EnvironmentFile=-/etc/default/tft
+ExecStart=/usr/local/bin/tftmode $TFT_MODE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
-systemctl enable tftd.service tft-input.service tft-mode-terminal.service
+systemctl disable tft-mode-terminal.service 2>/dev/null || true
+systemctl enable tftd.service tft-input.service tft-boot.service
 systemctl restart tft-input.service
-tftmode terminal
-echo "done. Reboot once (SPI), then: sudo tftcal (touch calibration), sudo tftmode gui | terminal"
+tftmode "$(. /etc/default/tft; echo "${TFT_MODE:-terminal}")"
+echo "done. Reboot once (SPI), then: sudo tftcal (touch calibration), sudo tftmode gui | terminal | console"

@@ -4,6 +4,7 @@
 Also handles mode hotkeys without SSH:
   Ctrl+Alt+F1 -> `tftmode terminal`
   Ctrl+Alt+F2 -> `tftmode gui`
+  Ctrl+Alt+F3 -> `tftmode console` (real tty1 console, kernel framebuffer)
 
 X keycodes = Linux evdev keycode + 8 (standard evdev XKB keycodes), so no keysym mapping is needed.
 Needs: python3-evdev python3-xlib. Run as root (reads /dev/input/event*).
@@ -139,11 +140,12 @@ class Forwarder:
         self.touch_changed = self.touch_moved = False
 
     def hotkey(self, ev):
-        if ev.value != 1 or ev.code not in (e.KEY_F1, e.KEY_F2):
+        modes = {e.KEY_F1: "terminal", e.KEY_F2: "gui", e.KEY_F3: "console"}
+        if ev.value != 1 or ev.code not in modes:
             return False
         if not (self.held & CTRL and self.held & ALT):
             return False
-        mode = "terminal" if ev.code == e.KEY_F1 else "gui"
+        mode = modes[ev.code]
         subprocess.Popen(["/usr/local/bin/tftmode", mode])
         return True
 
