@@ -1,0 +1,22 @@
+# Saved web pages / large documents
+*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors and OS junk
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Stray files created by a scp command typed without the ":" (copies to a local file named user@host)
+makrela@*
+
+# Backups made by the setup scripts
+*.bak*
